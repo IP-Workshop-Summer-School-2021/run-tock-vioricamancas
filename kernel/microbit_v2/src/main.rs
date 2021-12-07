@@ -112,6 +112,23 @@ pub struct MicroBit {
 
     scheduler: &'static RoundRobinSched<'static>,
     systick: cortexm4::systick::SysTick,
+
+    hello: &'static drivers::hello::Hello,
+    // dots_display: &'static drivers::dots_display::DotsDisplay<'static,
+    //     Leds,
+    // >,
+    dots_text: &'static drivers::dots_text::DotsText<
+        // 'a
+        'static,
+        // L
+        capsules::led_matrix::LedMatrixLed<
+            'static,
+            nrf52::gpio::GPIOPin<'static>,
+            capsules::virtual_alarm::VirtualMuxAlarm<'static, nrf52833::rtc::Rtc<'static>>,
+        >,
+        // A
+        capsules::virtual_alarm::VirtualMuxAlarm<'static, nrf52::rtc::Rtc<'static>>,
+    >,
 }
 
 impl SyscallDriverLookup for MicroBit {
@@ -135,6 +152,10 @@ impl SyscallDriverLookup for MicroBit {
             capsules::app_flash_driver::DRIVER_NUM => f(Some(self.app_flash)),
             capsules::sound_pressure::DRIVER_NUM => f(Some(self.sound_pressure)),
             kernel::ipc::DRIVER_NUM => f(Some(&self.ipc)),
+
+            drivers::hello::DRIVER_NUM => f(Some(self.hello)),
+            // drivers::dots_display::DRIVER_NUM => f(Some(self.dots_display)),
+            drivers::dots_text::DRIVER_NUM => f(Some(self.dots_text)),
             _ => f(None),
         }
     }
@@ -556,6 +577,37 @@ pub unsafe fn main() {
         nrf52::rtc::Rtc<'static>
     ));
 
+    let leds = components::led_matrix_leds!(
+        nrf52::gpio::GPIOPin<'static>,
+        capsules::virtual_alarm::VirtualMuxAlarm<'static, nrf52::rtc::Rtc<'static>>,
+        led,
+        (0, 0),
+        (1, 0),
+        (2, 0),
+        (3, 0),
+        (4, 0),
+        (0, 1),
+        (1, 1),
+        (2, 1),
+        (3, 1),
+        (4, 1),
+        (0, 2),
+        (1, 2),
+        (2, 2),
+        (3, 2),
+        (4, 2),
+        (0, 3),
+        (1, 3),
+        (2, 3),
+        (3, 3),
+        (4, 3),
+        (0, 4),
+        (1, 4),
+        (2, 4),
+        (3, 4),
+        (4, 4)
+    );
+
     //--------------------------------------------------------------------------
     // Process Console
     //--------------------------------------------------------------------------
@@ -578,6 +630,40 @@ pub unsafe fn main() {
 
     let scheduler = components::sched::round_robin::RoundRobinComponent::new(&PROCESSES)
         .finalize(components::rr_component_helper!(NUM_PROCS));
+
+    let virtual_dots_text_alarm = static_init!(
+        capsules::virtual_alarm::VirtualMuxAlarm<'static, nrf52833::rtc::Rtc>,
+        capsules::virtual_alarm::VirtualMuxAlarm::new(mux_alarm)
+    );
+
+    let app_data = board_kernel.create_grant(
+        drivers::dots_text::DRIVER_NUM,
+        &memory_allocation_capability,
+    );
+
+    let dots_text = static_init!(
+        drivers::dots_text::DotsText<
+            // 'a
+            'static,
+            // L
+            capsules::led_matrix::LedMatrixLed<
+                'static,
+                nrf52::gpio::GPIOPin<'static>,
+                capsules::virtual_alarm::VirtualMuxAlarm<'static, nrf52833::rtc::Rtc<'static>>,
+            >,
+            // A
+            capsules::virtual_alarm::VirtualMuxAlarm<'static, nrf52::rtc::Rtc<'static>>,
+        >,
+        drivers::dots_text::DotsText::new(leds, virtual_dots_text_alarm, app_data)
+    );
+
+    virtual_dots_text_alarm.set_alarm_client(dots_text);
+    dots_text.setup_alarm();
+
+    // let dots_display = static_init!(
+    //     drivers::dots_display::DotsDisplay,
+    //     drivers::dots_display::DotsDisplay::new(leds)
+    // );
 
     let microbit = MicroBit {
         ble_radio,
@@ -602,6 +688,8 @@ pub unsafe fn main() {
 
         scheduler,
         systick: cortexm4::systick::SysTick::new_with_calibration(64000000),
+        hello: static_init!(drivers::hello::Hello, drivers::hello::Hello::new()),
+        dots_text,
     };
 
     let chip = static_init!(
@@ -610,7 +698,7 @@ pub unsafe fn main() {
     );
     CHIP = Some(chip);
 
-    debug!("Initialization complete. Entering main loop.");
+    debug!("Initialization complete. Bip bop I'm a mictobit v2");
 
     //--------------------------------------------------------------------------
     // PROCESSES AND MAIN LOOP
